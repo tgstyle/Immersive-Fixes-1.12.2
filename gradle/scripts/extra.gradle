@@ -10,3 +10,17 @@ jar {
         )
     }
 }
+tasks.register('devJar', Jar) {
+    dependsOn classes
+    from sourceSets.main.output
+    archiveClassifier = 'dev'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+artifacts {
+    archives devJar
+}
+
+tasks.named('reobfJar').configure { mustRunAfter tasks.named('devJar') }
+
+assemble.dependsOn devJar
