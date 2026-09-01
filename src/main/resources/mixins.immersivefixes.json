@@ -12,6 +12,10 @@
     "InventoryBlueprintMixin"
   ],
   "server": [],
-  "client": [],
+  "client": [
+    "ClientEventHandlerSoundMixin",
+    "IETileSoundMixin",
+    "SoundManagerMixin"
+  ],
   "verbose": true
 }
