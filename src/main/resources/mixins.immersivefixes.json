@@ -11,7 +11,10 @@
     "ClientUtilsMixin",
     "InventoryBlueprintMixin",
     "EventHandlerMixin",
-    "BlockMetalDecoration2Mixin"
+    "BlockMetalDecoration2Mixin",
+    "EnergyHelperMixin",
+    "TileEntityCapacitorLVMixin",
+    "ImmersiveNetHandlerMixin"
   ],
   "server": [],
   "client": [
