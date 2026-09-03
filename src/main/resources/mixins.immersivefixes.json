@@ -14,7 +14,9 @@
     "BlockMetalDecoration2Mixin",
     "EnergyHelperMixin",
     "TileEntityCapacitorLVMixin",
-    "ImmersiveNetHandlerMixin"
+    "ImmersiveNetHandlerMixin",
+    "ConnectionMixin",
+    "TileEntityConnectorLVMixin"
   ],
   "server": [],
   "client": [
