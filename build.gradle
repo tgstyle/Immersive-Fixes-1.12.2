@@ -38,6 +38,7 @@ minecraft {
     injectedTags.put('MOD_ID', mod_id)
     injectedTags.put('MOD_NAME', mod_name)
     extraRunJvmArguments.addAll(
+            '-Xmx4G',
             '-Dforge.logging.console.level=debug',
             '-XX:+FlightRecorder',
             '-XX:StartFlightRecording=maxsize=512M,dumponexit=true,filename=logs/profile.jfr,settings=profile'
