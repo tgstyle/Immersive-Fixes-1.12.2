@@ -51,7 +51,14 @@
     "IETileSoundMixin",
     "SoundManagerMixin",
     "TileRenderBottlingMachineMixin",
-    "FeedthroughModelMixin"
+    "FeedthroughModelMixin",
+    "SmartLightingQuadMixin",
+    "ConnModelRealMixin",
+    "UtilsMixin",
+    "ClientProxyMixin",
+    "FeedthroughModelCacheMixin",
+    "FeedthroughItemOverrideMixin",
+    "TileEntityConnectorLVClientMixin"
   ],
   "verbose": true
 }

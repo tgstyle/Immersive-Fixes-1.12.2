@@ -39,6 +39,8 @@ public abstract class TileEntityConnectorLVMixin extends TileEntityImmersiveConn
 
     @Shadow public abstract int getMaxOutput();
 
+    @Shadow boolean firstTick;
+
     @Unique private boolean immersivefixes$lastOutput;
 
     @Inject(method = "isEnergyOutput()Z", at = @At("RETURN"), require = 1)
@@ -70,6 +72,20 @@ public abstract class TileEntityConnectorLVMixin extends TileEntityImmersiveConn
             if(end==null||!end.allowEnergyToPass(null)) { continue; }
             float loss = con.getAverageLossRate();
             end.addAvailableEnergy((1-loss)*stored, energy -> energyStorage.modifyEnergyStored((int)(-energy/(1-loss))));
+        }
+    }
+
+    @Inject(method = "update", at = @At("HEAD"), remap = true, require = 1)
+    private void markOnceOnFirstTick(CallbackInfo ci) {
+        if(!world.isRemote||!firstTick) { return; }
+        firstTick = false;
+        Set<Connection> conns = ImmersiveNetHandler.INSTANCE.getConnections(world, pos);
+        if(conns==null) { return; }
+        for(Connection conn : conns) {
+            if(pos.compareTo(conn.end) < 0&&world.isBlockLoaded(conn.end)) {
+                markContainingBlockForUpdate(null);
+                return;
+            }
         }
     }
 
