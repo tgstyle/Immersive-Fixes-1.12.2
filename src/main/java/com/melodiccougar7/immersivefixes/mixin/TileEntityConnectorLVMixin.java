@@ -4,6 +4,7 @@ import com.melodiccougar7.immersivefixes.helper.ChunkDirty;
 import com.melodiccougar7.immersivefixes.helper.ConnectorOutputMemo;
 import com.melodiccougar7.immersivefixes.helper.ConnectorResolveMemo;
 import com.melodiccougar7.immersivefixes.helper.ConnectorRoutes;
+import com.melodiccougar7.immersivefixes.helper.ShockDemand;
 
 import blusunrize.immersiveengineering.api.energy.immersiveflux.FluxStorage;
 import blusunrize.immersiveengineering.api.energy.wires.IImmersiveConnectable;
@@ -14,12 +15,15 @@ import blusunrize.immersiveengineering.api.energy.wires.TileEntityImmersiveConne
 import blusunrize.immersiveengineering.common.Config.IEConfig;
 import blusunrize.immersiveengineering.common.EventHandler;
 import blusunrize.immersiveengineering.common.blocks.metal.TileEntityConnectorLV;
+import blusunrize.immersiveengineering.common.util.Utils;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
+import net.minecraft.world.World;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
@@ -66,8 +70,9 @@ public abstract class TileEntityConnectorLVMixin extends TileEntityImmersiveConn
         if(world.isRemote||!IEConfig.enableWireDamage) { return; }
         int stored = energyStorage.getEnergyStored();
         if(stored<=0) { return; }
-        for(AbstractConnection con : ImmersiveNetHandler.INSTANCE.getIndirectEnergyConnections(pos, world, true)) {
-            if(con.cableType==null||immersivefixes$noShockingWire(con.end)) { continue; }
+        if(ShockDemand.idle(world)) { return; }
+        for(AbstractConnection con : ((ConnectorRoutes)ImmersiveNetHandler.INSTANCE).immersivefixes$shockTargets(pos, world)) {
+            if(ShockDemand.unwatched(world, con.end)) { continue; }
             IImmersiveConnectable end = ConnectorResolveMemo.resolve(con.end, world);
             if(end==null||!end.allowEnergyToPass(null)) { continue; }
             float loss = con.getAverageLossRate();
@@ -92,16 +97,6 @@ public abstract class TileEntityConnectorLVMixin extends TileEntityImmersiveConn
     @Inject(method = "notifyAvailableEnergy(ILjava/util/Set;)V", at = @At("HEAD"), cancellable = true, require = 1)
     private void notifyFromUpdateOnly(CallbackInfo ci) {
         ci.cancel();
-    }
-
-    @Unique
-    private boolean immersivefixes$noShockingWire(BlockPos node) {
-        Set<Connection> wires = ImmersiveNetHandler.INSTANCE.getConnections(world, node);
-        if(wires==null) { return true; }
-        for(Connection wire : wires) {
-            if(wire.cableType!=null&&wire.cableType.canCauseDamage()) { return false; }
-        }
-        return true;
     }
 
     /**
@@ -175,5 +170,10 @@ public abstract class TileEntityConnectorLVMixin extends TileEntityImmersiveConn
     @Redirect(method = "receiveEnergy(Lnet/minecraft/util/EnumFacing;IZ)I", at = @At(value = "INVOKE", target = "Lblusunrize/immersiveengineering/common/blocks/metal/TileEntityConnectorLV;markDirty()V", remap = true), require = 1)
     private void dirtyChunkOnReceive(TileEntityConnectorLV self) {
         ChunkDirty.mark(self);
+    }
+
+    @Redirect(method = "outputEnergy(IZI)I", at = @At(value = "INVOKE", target = "Lblusunrize/immersiveengineering/common/util/Utils;getExistingTileEntity(Lnet/minecraft/world/World;Lnet/minecraft/util/math/BlockPos;)Lnet/minecraft/tileentity/TileEntity;"), require = 1)
+    private TileEntity rememberedOutputTile(World world, BlockPos pos) {
+        return world.isRemote?Utils.getExistingTileEntity(world, pos): ConnectorResolveMemo.tileAt(pos, world);
     }
 }

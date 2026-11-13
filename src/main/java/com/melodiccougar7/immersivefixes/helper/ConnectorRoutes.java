@@ -8,4 +8,6 @@ import net.minecraft.world.World;
 public interface ConnectorRoutes {
 
     List<AbstractConnection> immersivefixes$outputsByPriority(BlockPos node, World world);
+
+    List<AbstractConnection> immersivefixes$shockTargets(BlockPos node, World world);
 }

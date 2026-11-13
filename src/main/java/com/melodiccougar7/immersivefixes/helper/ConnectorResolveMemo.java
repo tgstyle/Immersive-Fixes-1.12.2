@@ -2,41 +2,72 @@ package com.melodiccougar7.immersivefixes.helper;
 
 import blusunrize.immersiveengineering.api.ApiUtils;
 import blusunrize.immersiveengineering.api.energy.wires.IImmersiveConnectable;
+import blusunrize.immersiveengineering.common.util.Utils;
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.HashMap;
 import java.util.Map;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.World;
+import net.minecraft.world.chunk.Chunk;
+import net.minecraftforge.event.world.ChunkEvent;
 import net.minecraftforge.event.world.WorldEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
-import net.minecraftforge.fml.common.gameevent.TickEvent.Phase;
-import net.minecraftforge.fml.common.gameevent.TickEvent.ServerTickEvent;
 
 @Mod.EventBusSubscriber public final class ConnectorResolveMemo {
 
-    private static final Map<Integer, Memo> MEMOS = new HashMap<>();
+    private static final Map<Integer, Long2ObjectMap<Memo>> MEMOS = new HashMap<>();
 
     private ConnectorResolveMemo() {}
 
     public static IImmersiveConnectable resolve(BlockPos pos, World world) {
-        Memo memo = MEMOS.computeIfAbsent(world.provider.getDimension(), dimension -> new Memo());
-        long tick = world.getTotalWorldTime();
-        if(memo.tick!=tick) {
-            memo.tiles.clear();
-            memo.tick = tick;
-        }
-        TileEntity hit = memo.tiles.get(pos);
-        if(hit!=null&&!hit.isInvalid()) { return (IImmersiveConnectable)hit; }
+        TileEntity hit = remembered(pos, world);
+        if(hit instanceof IImmersiveConnectable) { return (IImmersiveConnectable)hit; }
         IImmersiveConnectable iic = ApiUtils.toIIC(pos, world);
-        if(iic instanceof TileEntity) { memo.tiles.put(pos, (TileEntity)iic); }
-        else { memo.tiles.remove(pos); }
+        if(iic instanceof TileEntity) { remember(pos, world, (TileEntity)iic); }
         return iic;
     }
 
-    @SubscribeEvent public static void onServerTick(ServerTickEvent event) {
-        if(event.phase!=Phase.END) { return; }
-        for(Memo memo : MEMOS.values()) { memo.tiles.clear(); }
+    public static TileEntity tileAt(BlockPos pos, World world) {
+        TileEntity hit = remembered(pos, world);
+        if(hit!=null) { return hit; }
+        TileEntity tile = Utils.getExistingTileEntity(world, pos);
+        if(tile!=null) { remember(pos, world, tile); }
+        return tile;
+    }
+
+    private static TileEntity remembered(BlockPos pos, World world) {
+        Long2ObjectMap<Memo> chunks = MEMOS.get(world.provider.getDimension());
+        Memo memo = chunks==null?null: chunks.get(ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4));
+        if(memo==null) { return null; }
+        TileEntity hit = memo.tiles.get(pos);
+        if(hit==null) { return null; }
+        if(hit.isInvalid()) {
+            memo.tiles.remove(pos);
+            return null;
+        }
+        memo.chunk.unloadQueued = false;
+        return hit;
+    }
+
+    private static void remember(BlockPos pos, World world, TileEntity tile) {
+        Long2ObjectMap<Memo> chunks = MEMOS.computeIfAbsent(world.provider.getDimension(), dimension -> new Long2ObjectOpenHashMap<>());
+        long key = ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4);
+        Memo memo = chunks.get(key);
+        if(memo==null) {
+            memo = new Memo(world.getChunk(pos));
+            chunks.put(key, memo);
+        }
+        memo.tiles.put(pos.toImmutable(), tile);
+    }
+
+    @SubscribeEvent public static void onChunkUnload(ChunkEvent.Unload event) {
+        if(event.getWorld().isRemote) { return; }
+        Long2ObjectMap<Memo> chunks = MEMOS.get(event.getWorld().provider.getDimension());
+        if(chunks!=null) { chunks.remove(ChunkPos.asLong(event.getChunk().x, event.getChunk().z)); }
     }
 
     @SubscribeEvent public static void onWorldUnload(WorldEvent.Unload event) {
@@ -45,7 +76,9 @@ import net.minecraftforge.fml.common.gameevent.TickEvent.ServerTickEvent;
     }
 
     private static final class Memo {
+        private final Chunk chunk;
         private final Map<BlockPos, TileEntity> tiles = new HashMap<>();
-        private long tick = -1;
+
+        private Memo(Chunk chunk) { this.chunk = chunk; }
     }
 }

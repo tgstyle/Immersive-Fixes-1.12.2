@@ -1,6 +1,7 @@
 package com.melodiccougar7.immersivefixes.mixin;
 
 import com.melodiccougar7.immersivefixes.helper.ConnectorRoutes;
+import com.melodiccougar7.immersivefixes.helper.ShockDemand;
 
 import blusunrize.immersiveengineering.api.ApiUtils;
 import blusunrize.immersiveengineering.api.DimensionBlockPos;
@@ -74,6 +75,7 @@ public abstract class ImmersiveNetHandlerMixin implements ConnectorRoutes {
     @Unique private static final Map<Integer, Map<BlockPos, Set<BlockPos>>> immersivefixes$wireDataAdded = new ConcurrentHashMap<>();
     @Unique private static final Map<Integer, Map<BlockPos, Map<BlockPos, Set<BlockPos>>>> immersivefixes$wirePositions = new ConcurrentHashMap<>();
     @Unique private static final Map<Set<AbstractConnection>, List<AbstractConnection>> immersivefixes$outputLists = new MapMaker().weakKeys().makeMap();
+    @Unique private static final Map<Set<AbstractConnection>, List<AbstractConnection>> immersivefixes$shockLists = new MapMaker().weakKeys().makeMap();
 
     /**
      * @author tgstyle
@@ -102,6 +104,7 @@ public abstract class ImmersiveNetHandlerMixin implements ConnectorRoutes {
             if(existing!=null) {
                 existing.addAll(closedList);
                 immersivefixes$outputLists.remove(existing);
+                immersivefixes$shockLists.remove(existing);
             }
             else if(ignoreIsEnergyOutput) { immersivefixes$outputLists.put(closedList, outputs); }
             if(!immersivefixes$alreadyReset.isEmpty()) { immersivefixes$alreadyReset.clear(); }
@@ -118,6 +121,30 @@ public abstract class ImmersiveNetHandlerMixin implements ConnectorRoutes {
             immersivefixes$outputLists.put(routes, outputs);
         }
         return outputs;
+    }
+
+    @Override
+    public List<AbstractConnection> immersivefixes$shockTargets(BlockPos node, World world) {
+        Set<AbstractConnection> routes = getIndirectEnergyConnections(node, world, true);
+        List<AbstractConnection> targets = immersivefixes$shockLists.get(routes);
+        if(targets==null) {
+            List<AbstractConnection> found = new ArrayList<>();
+            for(AbstractConnection con : routes) {
+                if(con.cableType!=null&&immersivefixes$shockingWireAt(world, con.end)) { found.add(con); }
+            }
+            targets = found.isEmpty()?Collections.emptyList(): Collections.unmodifiableList(found);
+            immersivefixes$shockLists.put(routes, targets);
+        }
+        return targets;
+    }
+
+    @Unique private boolean immersivefixes$shockingWireAt(World world, BlockPos node) {
+        Set<Connection> wires = getConnections(world, node);
+        if(wires==null) { return false; }
+        for(Connection wire : wires) {
+            if(wire.cableType!=null&&wire.cableType.canCauseDamage()) { return true; }
+        }
+        return false;
     }
 
     @Unique private List<AbstractConnection> immersivefixes$search(BlockPos node, World world, boolean ignoreIsEnergyOutput, Set<AbstractConnection> closedList) {
@@ -256,6 +283,8 @@ public abstract class ImmersiveNetHandlerMixin implements ConnectorRoutes {
         ImmersiveNetHandler.BlockWireInfo info = mapForDim==null?null: mapForDim.get(p);
         if(info==null||e.isEntityInvulnerable(IEDamageSources.wireShock)) { return; }
         if(e instanceof EntityPlayer&&((EntityPlayer)e).capabilities.disableDamage) { return; }
+        ShockDemand.note(e.world, info.in);
+        ShockDemand.note(e.world, info.near);
         handleMapForDamage(info.in, (EntityLivingBase)e, p);
         handleMapForDamage(info.near, (EntityLivingBase)e, p);
     }
