@@ -39,9 +39,11 @@
     "TileEntityTransformerMixin",
     "TileEntityRedstoneBreakerMixin",
     "TileEntityConnectorRedstoneMixin",
+    "RedstoneWireNetworkMixin",
     "TileEntityConnectorProbeMixin",
     "TileEntityEnergyMeterMixin",
-    "BlockConnectorMixin"
+    "BlockConnectorMixin",
+    "IESaveDataMixin"
   ],
   "server": [],
   "client": [
