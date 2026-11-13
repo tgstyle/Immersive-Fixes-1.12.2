@@ -2,6 +2,7 @@ package com.melodiccougar7.immersivefixes.mixin;
 
 import blusunrize.immersiveengineering.api.ApiUtils;
 import blusunrize.immersiveengineering.api.DimensionBlockPos;
+import blusunrize.immersiveengineering.api.TargetingInfo;
 import blusunrize.immersiveengineering.api.energy.wires.IICProxy;
 import blusunrize.immersiveengineering.api.energy.wires.IImmersiveConnectable;
 import blusunrize.immersiveengineering.api.energy.wires.ImmersiveNetHandler;
@@ -23,6 +24,8 @@ import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 import javax.annotation.Nullable;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.IntHashMap;
@@ -33,6 +36,7 @@ import net.minecraftforge.fml.common.FMLCommonHandler;
 import net.minecraftforge.fml.relauncher.Side;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.commons.lang3.tuple.Triple;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
@@ -41,6 +45,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(value = ImmersiveNetHandler.class, remap = false)
 public abstract class ImmersiveNetHandlerMixin {
@@ -56,6 +61,7 @@ public abstract class ImmersiveNetHandlerMixin {
 
     @Unique private static final Map<Integer, Set<BlockPos>> immersivefixes$alreadyReset = new ConcurrentHashMap<>();
     @Unique private static final Map<Integer, Map<BlockPos, Set<BlockPos>>> immersivefixes$wireDataAdded = new ConcurrentHashMap<>();
+    @Unique private static final Map<Integer, Map<BlockPos, Map<BlockPos, Set<BlockPos>>>> immersivefixes$wirePositions = new ConcurrentHashMap<>();
 
     /**
      * @author tgstyle
@@ -186,6 +192,15 @@ public abstract class ImmersiveNetHandlerMixin {
     private void dropResetRecordOnClear(int world, CallbackInfo ci) {
         immersivefixes$alreadyReset.clear();
         immersivefixes$wireDataAdded.remove(world);
+        immersivefixes$wirePositions.remove(world);
+        indirectConnections.remove(world);
+        indirectConnectionsIgnoreOut.remove(world);
+        transferPerTick.remove(world);
+    }
+
+    @Inject(method = "clearAllConnectionsFor(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/world/World;Lblusunrize/immersiveengineering/api/TargetingInfo;)Z", at = @At("HEAD"), cancellable = true, require = 1)
+    private void skipMissingNodeOrConnections(BlockPos node, World world, TargetingInfo target, CallbackInfoReturnable<Boolean> cir) {
+        if(ApiUtils.toIIC(node, world)==null||getConnections(world, node)==null) { cir.setReturnValue(false); }
     }
 
     @Inject(method = "addBlockData", at = @At("HEAD"), cancellable = true, require = 1)
@@ -195,6 +210,38 @@ public abstract class ImmersiveNetHandlerMixin {
         BlockPos low = con.start.compareTo(con.end) <= 0?con.start: con.end;
         BlockPos high = low==con.start?con.end: con.start;
         if(!traced.computeIfAbsent(low, p -> ConcurrentHashMap.newKeySet()).add(high)) { ci.cancel(); }
+    }
+
+    @Redirect(method = "addBlockData(Lnet/minecraft/world/World;Lblusunrize/immersiveengineering/api/energy/wires/ImmersiveNetHandler$Connection;)V", at = @At(value = "INVOKE", target = "Lblusunrize/immersiveengineering/api/ApiUtils;raytraceAlongCatenary(Lblusunrize/immersiveengineering/api/energy/wires/ImmersiveNetHandler$Connection;Lnet/minecraft/world/World;Ljava/util/function/Predicate;Ljava/util/function/Consumer;)Z"), require = 1)
+    private boolean indexTracedBlocks(Connection conn, World w, Predicate<Triple<BlockPos, Vec3d, Vec3d>> shouldStop, Consumer<Triple<BlockPos, Vec3d, Vec3d>> close) {
+        if(w.isRemote) { return ApiUtils.raytraceAlongCatenary(conn, w, shouldStop, close); }
+        Set<BlockPos> positions = ConcurrentHashMap.newKeySet();
+        boolean stopped = ApiUtils.raytraceAlongCatenary(conn, w, p -> {
+            positions.add(p.getLeft());
+            return shouldStop.test(p);
+        }, p -> {
+            positions.add(p.getLeft());
+            close.accept(p);
+        });
+        BlockPos low = conn.start.compareTo(conn.end) <= 0?conn.start: conn.end;
+        BlockPos high = low==conn.start?conn.end: conn.start;
+        immersivefixes$wirePositions.computeIfAbsent(w.provider.getDimension(), d -> new ConcurrentHashMap<>()).computeIfAbsent(low, p -> new ConcurrentHashMap<>()).put(high, positions);
+        return stopped;
+    }
+
+    @Inject(method = "removeConnectionAndDrop(Lblusunrize/immersiveengineering/api/energy/wires/ImmersiveNetHandler$Connection;Lnet/minecraft/world/World;Lnet/minecraft/util/math/BlockPos;)V", at = @At("HEAD"), cancellable = true, require = 1)
+    private void skipDropOfGoneWire(Connection conn, World world, @Nullable BlockPos dropPos, CallbackInfo ci) {
+        if(conn==null||world==null) {
+            ci.cancel();
+            return;
+        }
+        Set<Connection> conns = getConnections(world, conn.start);
+        if(conns!=null&&conns.stream().anyMatch(conn::hasSameConnectors)) { return; }
+        Map<BlockPos, ImmersiveNetHandler.BlockWireInfo> mapForDim = blockWireMap.lookup(world.provider.getDimension());
+        if(mapForDim!=null) {
+            for(BlockPos pos : mapForDim.keySet()) { immersivefixes$forgetWireAt(mapForDim, pos, conn); }
+        }
+        ci.cancel();
     }
 
     /**
@@ -213,10 +260,15 @@ public abstract class ImmersiveNetHandlerMixin {
         if(reverseConns!=null) { reverseConns.removeIf(con::hasSameConnectors); }
         if(forwardConns!=null) { forwardConns.removeIf(con::hasSameConnectors); }
         Map<BlockPos, ImmersiveNetHandler.BlockWireInfo> mapForDim = blockWireMap.lookup(dim);
-        ApiUtils.raytraceAlongCatenaryRelative(con, p -> {
-            immersivefixes$forgetWireAt(mapForDim, p.getLeft(), con);
-            return false;
-        }, p -> immersivefixes$forgetWireAt(mapForDim, p.getLeft(), con), vecStart, vecEnd);
+        Set<BlockPos> indexed = world.isRemote?null: immersivefixes$takeTracedPositions(dim, con);
+        if(indexed!=null) {
+            for(BlockPos pos : indexed) { immersivefixes$forgetWireAt(mapForDim, pos, con); }
+        } else {
+            ApiUtils.raytraceAlongCatenaryRelative(con, p -> {
+                immersivefixes$forgetWireAt(mapForDim, p.getLeft(), con);
+                return false;
+            }, p -> immersivefixes$forgetWireAt(mapForDim, p.getLeft(), con), vecStart, vecEnd);
+        }
         if(!world.isRemote) { immersivefixes$forgetTracedWire(dim, con); }
 
         IImmersiveConnectable iic = ApiUtils.toIIC(con.end, world);
@@ -243,6 +295,14 @@ public abstract class ImmersiveNetHandlerMixin {
         info.in.removeIf(t -> t.getLeft().hasSameConnectors(con));
         info.near.removeIf(t -> t.getLeft().hasSameConnectors(con));
         if(info.in.isEmpty()&&info.near.isEmpty()) { mapForDim.remove(pos); }
+    }
+
+    @Unique private static Set<BlockPos> immersivefixes$takeTracedPositions(int dimension, Connection con) {
+        Map<BlockPos, Map<BlockPos, Set<BlockPos>>> byLow = immersivefixes$wirePositions.get(dimension);
+        if(byLow==null) { return null; }
+        BlockPos low = con.start.compareTo(con.end) <= 0?con.start: con.end;
+        Map<BlockPos, Set<BlockPos>> peers = byLow.get(low);
+        return peers==null?null: peers.remove(low==con.start?con.end: con.start);
     }
 
     @Unique private static void immersivefixes$forgetTracedWire(int dimension, Connection con) {

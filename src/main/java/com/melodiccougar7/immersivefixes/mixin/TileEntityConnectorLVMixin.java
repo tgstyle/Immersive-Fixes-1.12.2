@@ -1,5 +1,7 @@
 package com.melodiccougar7.immersivefixes.mixin;
 
+import com.melodiccougar7.immersivefixes.helper.ConnectorOutputMemo;
+
 import blusunrize.immersiveengineering.api.ApiUtils;
 import blusunrize.immersiveengineering.api.energy.wires.IImmersiveConnectable;
 import blusunrize.immersiveengineering.api.energy.wires.TileEntityImmersiveConnectable;
@@ -16,12 +18,25 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(value = TileEntityConnectorLV.class, remap = false)
-public abstract class TileEntityConnectorLVMixin extends TileEntityImmersiveConnectable {
+public abstract class TileEntityConnectorLVMixin extends TileEntityImmersiveConnectable implements ConnectorOutputMemo {
 
     @Unique private final Map<BlockPos, TileEntity> immersivefixes$resolved = new HashMap<>();
     @Unique private long immersivefixes$resolvedTick = -1;
+    @Unique private boolean immersivefixes$lastOutput;
+
+    @Inject(method = "isEnergyOutput()Z", at = @At("RETURN"), require = 1)
+    private void rememberOutput(CallbackInfoReturnable<Boolean> cir) {
+        immersivefixes$lastOutput = cir.getReturnValue();
+    }
+
+    @Override
+    public boolean immersivefixes$outputChanged() {
+        boolean before = immersivefixes$lastOutput;
+        return isEnergyOutput()!=before;
+    }
 
     @Inject(method = "update", at = @At("HEAD"), cancellable = true, remap = true, require = 1)
     private void stopRelayTicking(CallbackInfo ci) {
